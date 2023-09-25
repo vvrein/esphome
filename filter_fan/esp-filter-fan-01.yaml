@@ -1,0 +1,141 @@
+esphome:
+  name: "esp-filter-fan-01"
+
+preferences:
+  flash_write_interval: 30sec
+
+esp8266:
+  board: esp12e
+  restore_from_flash: true
+  early_pin_init: false
+
+logger:
+
+api:
+  encryption:
+    key: !secret encryption_key
+
+ota:
+  password: !secret ota_password
+
+wifi:
+  power_save_mode: HIGH
+  ssid: !secret wifi_name
+  password: !secret wifi_password
+  domain: ".iot.internal"
+
+captive_portal:
+
+web_server:
+  port: 80
+  ota: False
+
+globals:
+  - id: fan_state
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+number:
+  - platform: template
+    name: "fan_slider"
+    id: "fan_slider"
+    step: 0.25
+    min_value: 0.25
+    max_value: 1.0
+    mode: slider
+    restore_value: true
+    optimistic: true
+    set_action:
+      - lambda: |-
+          if (not id(fan_state)) { return; }
+          id(custom_fan).set_level(x);
+
+output:
+  - { platform: gpio, pin: GPIO16, id: speed1 }
+  - { platform: gpio, pin: GPIO14, id: speed2 }
+  - { platform: gpio, pin: GPIO12, id: speed3 }
+  - { platform: gpio, pin: GPIO13, id: speed4 }
+
+  - platform: template
+    id: custom_fan
+    type: float
+    write_action:
+      - lambda: |-
+          id(speed1).turn_off();
+          id(speed2).turn_off();
+          id(speed3).turn_off();
+          id(speed4).turn_off();
+
+          if (state == 0) {
+            id(fan_state) = 0;
+          } else {
+            id(fan_state) = 1;
+          }
+          if (state == 0.25) {
+            id(speed1).turn_on();
+          }
+          if (state == 0.50) {
+            id(speed2).turn_on();
+          }
+          if (state == 0.75) {
+            id(speed3).turn_on();
+          }
+          if (state == 1) {
+            id(speed4).turn_on();
+          }
+
+switch:
+  - platform: template
+    id: fan_switch
+    name: fan_switch
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: |-
+      if (id(fan_state)) {
+        return true;
+      } else {
+        return false;
+      }
+    turn_on_action:
+      - lambda: id(custom_fan).set_level(id(fan_slider).state);
+    turn_off_action:
+      - lambda: id(custom_fan).set_level(0);
+
+binary_sensor:
+  - platform: gpio
+    id: onoff
+    pin: 
+      number: GPIO4
+      mode:
+        input: true
+        pullup: true
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      then:
+        - switch.toggle: fan_switch
+
+  - platform: gpio
+    id: speed_button
+    pin:
+      number: GPIO5
+      mode:
+        input: true
+        pullup: true
+    filters:
+      - delayed_on: 30ms
+      - delayed_off: 30ms
+    on_press:
+      then:
+        - lambda: |-
+            if (not id(fan_state)) { return; }
+
+            auto call = id(fan_slider).make_call();
+            if (id(fan_slider).state < 1) {
+              call.set_value(id(fan_slider).state + 0.25);
+            } else {
+              call.set_value(0.25);
+            }
+            call.perform();
